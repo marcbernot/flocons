@@ -1,0 +1,20 @@
+{
+  "LiteBuildConfig": {
+    "contents": [
+      "../notebooks"
+    ],
+    "no_sourcemaps": true,
+    "extra_ignore_contents": [
+      "/out/"
+    ]
+  },
+  "PyodideLockAddon": {
+    "enabled": true,
+    "wheels": [
+      "../build/wheels"
+    ],
+    "prefetch_extra": [
+      "flocons"
+    ]
+  }
+}

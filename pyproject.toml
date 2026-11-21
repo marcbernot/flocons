@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "flocons"
+version = "0.0.1"
+description = "TODO one line"
+readme = "README.md"
+requires-python = ">=3.12"
+# license = "MIT"   # TODO pick one (SPDX id) and add a LICENSE file
+# These are what the browser gets: the PyodideLockAddon resolves them from the wheel's metadata.
+# Keep them in sync with [feature.runtime] in pixi.toml (tests/test_deps_sync.py checks it).
+# Only pure-Python or Pyodide-built packages work here. `new` writes the first list.
+dependencies = ["numpy", "scipy", "scikit-image", "matplotlib", "pillow"]
+
+[project.optional-dependencies]
+# Desktop-only extras (anything that can't run in Pyodide: pooch, h5py, dask, ...).
+# Import them inside functions, never at module top level, so `import flocons` works in the browser.
+local = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/flocons"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

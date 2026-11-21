@@ -1,0 +1,141 @@
+# One manifest, three environments (DUAL-ENV.md):
+#   default  local work: notebooks, tests                         (pixi run lab / check-env / doctor)
+#            = the default feature (tools) + the runtime feature (what the code imports)
+#   lite     builds the static JupyterLite site, nothing else     (pixi run build-lite / serve-lite)
+#   e2e      runs the built site in a headless browser            (pixi run test-lite / shot-preview)
+# A task exists in one environment only and runs there automatically: plain `pixi run <task>`.
+# `pixi task list -s` shows the tasks per environment, `pixi task list -e default` (or -e lite,
+# ...) those of one environment with their descriptions; plain `pixi task list` shows them all.
+
+[workspace]
+name = "flocons"
+channels = ["conda-forge"]
+platforms = ["linux-64"]   # solved on every add/remove/install: add "osx-arm64", "win-64" when needed
+requires-pixi = ">=0.84"
+
+[environments]
+default = { features = ["runtime"] }   # plus the default feature, always included
+lite = { features = ["lite"], no-default-feature = true }
+e2e = { features = ["e2e"], no-default-feature = true }
+
+# ================================================================ default environment
+[dependencies]
+# Same minor version as Pyodide in jupyterlite-pyodide-kernel 0.8.* (Pyodide 314 = Python 3.14),
+# so "works locally" and "works in the browser" mean the same language version.
+python = "3.14.*"
+# local notebooks: free to add server-side lab extensions here (jupyterlab-git, lsp, jupytext...),
+# they never reach the Lite site.
+jupyterlab = ">=4.6"
+# dev
+pytest = "*"
+jupytext = "*"   # nb-new only: writes a notebook from a py:percent file (one-way, no pairing)
+
+[pypi-dependencies]
+flocons = { path = ".", editable = true }
+
+# ---------------------------------------------------------------- runtime feature
+# What the package and the notebooks import: the SAME list as [project].dependencies in
+# pyproject.toml, which is what the browser gets (tests/test_deps_sync.py checks both ways).
+# `new` writes the first list. Later: pixi add --feature runtime --pinning-strategy no-pin <pkg>
+# (PyPI-only: --pypi), then add <pkg> to [project].dependencies and to the test notebook.
+# Without --feature, pixi add puts it in the tools above, and the browser never gets it.
+[feature.runtime.dependencies]
+numpy = "*"
+scipy = "*"
+scikit-image = "*"
+matplotlib-base = "*"
+pillow = "*"
+
+[feature.runtime.pypi-dependencies]
+
+[tasks.lab]
+description = "Open JupyterLab on the notebooks folder"
+cmd = "jupyter lab --notebook-dir notebooks"
+
+[tasks.test]
+description = "Unit tests"
+cmd = "pytest -q"
+
+[tasks.test-nb]
+description = "Execute every notebook locally into _preview/*.html and *.txt (its text); lists cells slower than 2 s (cached)"
+cmd = "python lite/time_notebooks.py --html _preview notebooks/*.ipynb"
+# One run serves every task that depends on it: pixi skips the task ("cache hit") while these
+# inputs and the environment are unchanged and the outputs still exist.
+inputs = [
+    "notebooks/**", "!notebooks/out/**", "!notebooks/.ipynb_checkpoints/**",
+    "src/**", "!src/**/__pycache__/**", "pyproject.toml", "lite/time_notebooks.py",
+]
+outputs = ["_preview/*.html", "_preview/*.txt", "notebooks/out/**"]
+
+[tasks.check-env]
+description = "Unit tests + every notebook executed locally (+ slow cells): the local half of the proof"
+depends-on = ["test", "test-nb"]
+
+[tasks.nb-new]
+description = "Write notebooks/x.ipynb from a py:percent file notebooks/x.py, then delete the .py"
+cmd = "python lite/nb_new.py"
+
+[tasks.preview]
+description = "Every notebook executed into _preview/*.html, to look at the figures (= test-nb)"
+depends-on = ["test-nb"]
+
+[tasks.doctor]
+description = "Can this machine run test-lite? Free memory and disk, Playwright browser, CDN"
+cmd = "python lite/doctor.py"
+
+# ================================================================ lite environment
+# Only what the build needs. `jupyter lite build` copies every JupyterLab extension found in THIS
+# environment into the site, so what is listed here is exactly what ships to the browser.
+[feature.lite.dependencies]
+python = "3.14.*"                                # same as default and Pyodide; avoids brand-new Python surprises
+jupyterlite-core = "0.8.*"
+jupyterlite-pyodide-kernel-with-lock = "0.8.*"   # the kernel + uv + pyodide-lock (PyodideLockAddon)
+jupyter_server = "*"                             # used by the build to import the notebooks
+pyviz_comms = "*"                                # its lab extension lets Panel/HoloViews talk to JS in Lite
+# ipywidgets = "*"                               # add if notebooks use ipywidgets
+
+[feature.lite.tasks.wheel]
+description = "Build the package wheel that the Lite site bundles"
+cmd = "rm -rf build/wheels && uv build --wheel --out-dir build/wheels"
+
+[feature.lite.tasks.browser-deps]
+description = "Can the browser have [project].dependencies? Pyodide's lock and PyPI, in seconds (DUAL-ENV.md, 4)"
+cmd = "python lite/browser_deps.py"
+
+[feature.lite.tasks.build-lite]
+description = "Build the static JupyterLite site into _output/"
+# fix_lock.py: Pyodide hangs on dependency cycles in the lock (panel <-> panel-material-ui)
+# starts from an empty _output: files removed from notebooks/ would otherwise stay in the site
+cmd = "rm -rf ../_output .jupyterlite.doit.db && jupyter lite build --output-dir ../_output && python fix_lock.py ../_output/static/pyodide-lock/pyodide-lock.json"
+cwd = "lite"
+depends-on = ["wheel"]
+
+[feature.lite.tasks.serve-lite]
+description = "Serve _output/ on http://localhost:8000 (run build-lite first)"
+cmd = "python -m http.server --directory _output 8000"
+
+# ================================================================ e2e environment
+# The browser driver stays out of default and lite.
+[feature.e2e.dependencies]
+python = "3.14.*"
+playwright-python = "*"
+
+[feature.e2e.tasks.browser]
+description = "Download the headless Chromium that test-lite drives (once per machine)"
+cmd = "playwright install chromium"
+
+[feature.e2e.tasks.test-lite-start]
+description = "First step of test-lite: write `running` to _test-lite/status, before the build"
+cmd = "python lite/run_notebooks.py --mark-running"
+
+[feature.e2e.tasks.test-lite]
+description = "Build the site, then run every notebook in a headless browser; fails on a cell error or a figure drawn empty"
+# the outcome is also one line in _test-lite/status: running, then ok / FAIL / refused.
+# depends-on runs in this order: test-lite-start first, so an old `ok` never survives a new run
+cmd = "python lite/run_notebooks.py _output"
+depends-on = ["test-lite-start", "build-lite", "browser"]
+
+[feature.e2e.tasks.shot-preview]
+description = "Run preview, then screenshot each figure of _preview/*.html into _preview/<nb>-cellNN.png"
+cmd = "python lite/screenshot.py _preview"
+depends-on = ["preview", "browser"]
