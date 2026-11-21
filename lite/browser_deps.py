@@ -18,7 +18,6 @@ Usage: python lite/browser_deps.py
 """
 
 import json
-import re
 import sys
 import tomllib
 import urllib.request

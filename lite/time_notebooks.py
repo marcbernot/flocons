@@ -99,11 +99,7 @@ def run(path: Path, slow: float, html: Path | None) -> bool:
         body, _ = HTMLExporter().from_notebook_node(nb)
         (html / f"{path.stem}.html").write_text(body, encoding="utf-8")
         (html / f"{path.stem}.txt").write_text(digest(nb), encoding="utf-8")
-    flagged = [
-        (i, t)
-        for i, t in times.items()
-        if t > slow and not imports(nb.cells[i].source)
-    ]
+    flagged = [(i, t) for i, t in times.items() if t > slow and not imports(nb.cells[i].source)]
     print(f"{'ok  ' if ok else 'FAIL'} {path} ({total:.1f} s)")
     for i, t in sorted(flagged, key=lambda x: -x[1]):
         first = nb.cells[i].source.strip().splitlines()[0][:70]

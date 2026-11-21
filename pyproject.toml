@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "flocons"
 version = "0.0.1"
-description = "TODO one line"
+description = "A paper snowflake from a photo to an exactly symmetric SVG of straight-edged polygons"
 readme = "README.md"
 requires-python = ">=3.12"
 # license = "MIT"   # TODO pick one (SPDX id) and add a LICENSE file
@@ -24,3 +24,20 @@ packages = ["src/flocons"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# ---------------------------------------------------------------- project layer (PROJECT.md)
+[tool.lite.publish]
+# Files the notebooks write (notebooks/out/, not in git) that are published on purpose, e.g. a
+# figure for the README: "copy in git" = "file written by a notebook". `pixi run publish` copies
+# them; `pixi run check` fails when a copy is out of date.
+# "docs/figure.svg" = "notebooks/out/figure.svg"
+"docs/snowflake.svg" = "notebooks/out/snowflake.svg"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"*.ipynb" = ["E501"]   # cells are not modules: long plot titles are fine

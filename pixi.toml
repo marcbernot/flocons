@@ -14,9 +14,10 @@ platforms = ["linux-64"]   # solved on every add/remove/install: add "osx-arm64"
 requires-pixi = ">=0.84"
 
 [environments]
-default = { features = ["runtime"] }   # plus the default feature, always included
+default = { features = ["runtime", "project"] }   # plus the default feature, always included
 lite = { features = ["lite"], no-default-feature = true }
 e2e = { features = ["e2e"], no-default-feature = true }
+github = { features = ["github"], no-default-feature = true }
 
 # ================================================================ default environment
 [dependencies]
@@ -139,3 +140,67 @@ depends-on = ["test-lite-start", "build-lite", "browser"]
 description = "Run preview, then screenshot each figure of _preview/*.html into _preview/<nb>-cellNN.png"
 cmd = "python lite/screenshot.py _preview"
 depends-on = ["preview", "browser"]
+
+# ================================================================ project layer (PROJECT.md)
+# Added by `new_project.py project` on top of the environment of DUAL-ENV.md: hooks, the full
+# check, published copies, GitHub. The `project` feature is part of `default` ([environments]),
+# so its tasks run with a plain `pixi run <task>`, like the ones above.
+[feature.project.dependencies]
+prek = "*"
+
+[feature.project.tasks.lint]
+description = "Run all prek hooks on all files (strips notebook outputs, ruff, ...)"
+cmd = "prek run --all-files"
+
+[feature.project.tasks.tidy]
+description = "Stage everything and let the hooks rewrite what they want (run before check)"
+cmd = "git add -A && (prek run --all-files > /dev/null || true) && git add -A"
+
+[feature.project.tasks.check]
+description = "lint + check-env (tests, notebooks) + publish-check: what CI runs"
+depends-on = ["lint", "check-env", "publish-check"]
+
+[feature.project.tasks.publish]
+description = "Run the notebooks, then copy the files listed in [tool.lite.publish] (pyproject.toml)"
+cmd = "python lite/publish.py"
+depends-on = ["test-nb"]
+
+[feature.project.tasks.publish-check]
+description = "Run the notebooks, then fail if a published copy differs from what they wrote"
+cmd = "python lite/publish.py --check"
+depends-on = ["test-nb"]
+
+[feature.project.tasks.hooks]
+description = "Install the git pre-commit hook (once per clone)"
+cmd = "prek install"
+
+[feature.project.tasks.hooks-update]
+description = "Bump hook revisions in prek.toml"
+cmd = "prek auto-update"
+
+# ---------------------------------------------------------------- github environment
+# Only gh and git: nothing here is needed to work on the project, and CI never installs it.
+# Needs `pixi run -e github gh auth login` once per machine.
+# Pages needs a PUBLIC repo on free GitHub plans. Order: create+push, then enable Pages while the
+# first CI build is still running, so its deploy job finds Pages ready. If it lost the race: github-deploy.
+[feature.github.dependencies]
+gh = "*"
+git = "*"    # `gh repo create --push` calls git
+
+[feature.github.tasks.github-init]
+description = "One-shot after the first commit: create the PUBLIC repo, push main, enable Pages (Actions)"
+cmd = "gh repo create $PIXI_WORKSPACE_NAME --public --source . --remote origin --push && pixi run github-pages"
+
+[feature.github.tasks.github-pages]
+description = "Enable/repair Pages with source = GitHub Actions and set the repo homepage (idempotent)"
+cmd = """gh api -X POST repos/{owner}/{repo}/pages -f build_type=workflow --silent \
+|| gh api -X PUT repos/{owner}/{repo}/pages -f build_type=workflow --silent \
+&& gh repo edit --homepage $(gh api repos/{owner}/{repo}/pages --jq .html_url)"""
+
+[feature.github.tasks.github-deploy]
+description = "Re-run the Pages workflow on main"
+cmd = "gh workflow run pages.yml --ref main"
+
+[feature.github.tasks.github-site]
+description = "Print the Pages URL"
+cmd = "gh api repos/{owner}/{repo}/pages --jq .html_url"

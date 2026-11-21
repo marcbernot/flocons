@@ -1,0 +1,56 @@
+name: Deploy JupyterLite to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:   # default environment: prek hooks + pytest + execute notebooks (pixi run check)
+           # (the github environment, gh + git, is for a person's machine: no job installs it)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: prefix-dev/setup-pixi@v0.11.3
+        with:
+          environments: default
+          cache: true
+          cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
+      - run: pixi run check
+
+  build:   # lite + e2e environments: build the site, run it in a headless browser, upload it
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: prefix-dev/setup-pixi@v0.11.3
+        with:
+          environments: lite e2e
+          cache: true
+          cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
+      - run: pixi run -e e2e playwright install --with-deps chromium
+      - run: pixi run test-lite   # builds the site first; a site with a failing notebook is not deployed
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _output
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
